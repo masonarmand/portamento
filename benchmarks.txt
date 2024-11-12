@@ -1,0 +1,27 @@
+
+---- Music Library Info: -----
+
+Total Size:        26.2 GiB
+Number of Artists: 45
+Number of Albums:  80
+Number of Artists: 45
+Number of Tracks:  963
+
+--- loading without images ---
+
+loading from database:
+real	0m0.007s
+user	0m0.007s
+sys	0m0.000s
+
+scanning music files
+& saving to database:
+real	0m0.094s
+user	0m0.078s
+sys	0m0.016s
+
+---- loading with images -----
+
+
+
+------------------------------

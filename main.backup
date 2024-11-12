@@ -1,0 +1,107 @@
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#define NK_INCLUDE_DEFAULT_ALLOCATOR
+#define NK_IMPLEMENTATION
+#define NK_XLIB_IMPLEMENTATION
+
+#include "portamento.h"
+int main(void)
+{
+
+        MusicLibrary library;
+        init_music_library(&library);
+        sqlite3* db;
+        Album* current;
+
+
+        if (sqlite3_open("/home/mason/.portamento/db/music.db", &db) != SQLITE_OK) {
+                fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
+        }
+
+        db_create_schema(db);
+        db_load_music_library(db, &library);
+        scan_new_music("/home/mason/.portamento/testdir/", db, &library);
+        db_save_music_library(db, &library);
+        sqlite3_close(db);
+
+        library.scanning_done = true;
+
+        while (1) {
+                AlbumCoverRequest* req;
+
+                if (!library.album_cover_queue.head) {
+                        break;
+                }
+
+                req = library.album_cover_queue.head;
+                library.album_cover_queue.head = req->next;
+                if (!library.album_cover_queue.head)
+                        library.album_cover_queue.tail = NULL;
+
+                load_thumbnail_image(&req->album->art, req->album_path, req->music_filename, req->album->title, req->has_meta_image);
+
+                free(req->album_path);
+                free(req->music_filename);
+                free(req);
+        }
+        /*getchar();
+        free_music_library(&library);*/
+
+        return 0;
+        /*
+
+
+        sqlite3* db;
+        MusicLibrary library;
+        pthread_t album_art_thread, library_thread;
+
+        init_music_library(&library);
+
+        pthread_create(&album_art_thread, NULL, album_cover_loader_thread, &library.album_cover_queue);
+        pthread_create(&library_thread, NULL, music_library_thread, &library);
+
+        while (true) {
+                Event* e = try_dequeue_event(&library.event_queue);
+                bool scanning_done = false;
+                while (e) {
+                        switch (e->type) {
+                        case EVENT_TRACK_LOADED:
+                                printf("Loaded track %s\n", e->data.track->meta.title);
+                                break;
+                        case EVENT_ALBUM_LOADED:
+                                printf("Loaded album %s\n", e->data.album->title);
+                                break;
+                        case EVENT_ARTIST_LOADED:
+                                printf("Loaded artist %s\n", e->data.artist->name);
+                                break;
+                        case EVENT_ALBUM_ART_LOADED:
+                                printf("Loaded album art for %s (%d x %d)\n", e->data.album->title, e->data.album->art.width, e->data.album->art.height);
+                                break;
+                        }
+                        free(e);
+                        e = try_dequeue_event(&library.event_queue);
+                }
+
+                pthread_mutex_lock(library.mutex);
+                scanning_done = library.scanning_done;
+                pthread_mutex_unlock(library.mutex);
+
+                if (scanning_done && library.event_queue.head == NULL) {
+                        pthread_mutex_lock(&library.album_cover_queue.mutex);
+                        library.album_cover_queue.finished = true;
+                        pthread_cond_signal(&library.album_cover_queue.cond);
+                        pthread_mutex_unlock(&library.album_cover_queue.mutex);
+                        break;
+                }
+        }
+
+        pthread_join(library_thread, NULL);
+        pthread_join(album_art_thread, NULL);
+
+        pthread_cond_destroy(&library.event_queue.cond);
+        pthread_mutex_destroy(&library.event_queue.mutex);
+
+        free_music_library(&library);
+
+        return 0;*/
+}

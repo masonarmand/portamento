@@ -1,0 +1,330 @@
+#define NK_INCLUDE_FIXED_TYPES
+#define NK_INCLUDE_DEFAULT_ALLOCATOR
+#define NK_INCLUDE_STANDARD_IO
+#define NK_INCLUDE_STANDARD_VARARGS
+#define NK_INCLUDE_DEFAULT_ALLOCATOR
+#define NK_INCLUDE_VERTEX_BUFFER_OUTPUT
+#define NK_INCLUDE_FONT_BAKING
+#define NK_INCLUDE_DEFAULT_FONT
+#define NK_IMPLEMENTATION
+#define NK_GLFW_GL3_IMPLEMENTATION
+#define NK_KEYSTATE_BASED_INPUT
+
+#include "portamento.h"
+#include "nuklear_glfw_gl3.h"
+
+
+
+#define WINDOW_WIDTH 1200
+#define WINDOW_HEIGHT 800
+
+#define MAX_VERTEX_BUFFER 512 * 1024
+#define MAX_ELEMENT_BUFFER 128 * 1024
+
+typedef struct {
+    enum { VIEW_ALBUM_GRID, VIEW_ALBUM_DETAIL } view;
+    Album* selected_album;
+} UIState;
+
+UIState ui_state = { VIEW_ALBUM_GRID, NULL };
+
+#define ALBUM_SIZE 145
+
+static void error_callback(int e, const char *d){printf("Error %d: %s\n", e, d);}
+
+static void die(const char *fmt, ...)
+{
+        va_list ap;
+        va_start(ap, fmt);
+        vfprintf(stderr, fmt, ap);
+        va_end(ap);
+        fputs("\n", stderr);
+        exit(EXIT_FAILURE);
+}
+
+
+struct nk_image load_image(const char* filename)
+{
+        int x, y, n;
+        GLuint tex;
+        unsigned char *data = stbi_load(filename, &x, &y, &n, 0);
+        unsigned char* converted_data = NULL;
+        GLenum format;
+
+        if (!data) {
+                fprintf(stderr, "failed to load image: %s\n", filename);
+                exit(1);
+        }
+
+        printf("loading %s\n", filename);
+
+        if (n == 1) {
+                int i;
+                converted_data = malloc (x * y * 3);
+                for (i = 0; i < x * y; i++) {
+                        converted_data[i * 3 + 0] = data[i];
+                        converted_data[i * 3 + 1] = data[i];
+                        converted_data[i * 3 + 2] = data[i];
+                }
+                n = 3;
+        }
+
+        glGenTextures(1, &tex);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+        format = (n == 4) ? GL_RGBA : GL_RGB;
+
+        printf("loaded image. (%d x %d) channels: %d\n", x, y, n);
+
+        glTexImage2D(GL_TEXTURE_2D, 0, format, x, y, 0, format, GL_UNSIGNED_BYTE, converted_data ? converted_data : data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        stbi_image_free(data);
+        if (converted_data) free(converted_data);
+
+        return nk_image_id((int)tex);
+}
+
+
+void render(void)
+{
+        MusicLibrary library;
+        sqlite3* db;
+        pthread_t album_art_thread, library_thread;
+
+        static GLFWwindow* win;
+        int width = 0;
+        int height = 0;
+        int display_width=0, display_height=0;
+        struct nk_context* ctx;
+        struct nk_colorf bg;
+
+        glfwSetErrorCallback(error_callback);
+        if (!glfwInit()) {
+                fprintf(stdout, "[GFLW] failed to init!\n");
+                exit(1);
+        }
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#ifdef __APPLE__
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+#endif
+        win = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Demo", NULL, NULL);
+        glfwMakeContextCurrent(win);
+        glfwSetWindowUserPointer(win, &ctx);
+        glfwGetWindowSize(win, &width, &height);
+        glfwGetFramebufferSize(win, &display_width, &display_height);
+
+        glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+        glewExperimental = 1;
+        if (glewInit() != GLEW_OK) {
+                fprintf(stderr, "Failed to setup GLEW\n");
+                exit(1);
+        }
+
+        glEnable(GL_TEXTURE_2D);
+
+        ctx = nk_glfw3_init(win, NK_GLFW3_INSTALL_CALLBACKS);
+        struct nk_font_atlas *atlas;
+        nk_glfw3_font_stash_begin(&atlas);
+        nk_glfw3_font_stash_end();
+
+        init_music_library(&library);
+
+        pthread_create(&album_art_thread, NULL, album_cover_loader_thread, &library.album_cover_queue);
+        pthread_create(&library_thread, NULL, music_library_thread, &library);
+/*
+        while (!glfwWindowShouldClose(win)) {
+                Event* e = try_dequeue_event(&library.event_queue);
+                bool scanning_done = false;
+
+                glfwPollEvents();
+                nk_glfw3_new_frame();
+
+                while (e) {
+                        switch (e->type) {
+                        case EVENT_TRACK_LOADED:
+                                printf("Loaded track %s\n", e->data.track->meta.title);
+                                break;
+                        case EVENT_ALBUM_LOADED:
+                                printf("Loaded album %s\n", e->data.album->title);
+                                break;
+                        case EVENT_ARTIST_LOADED:
+                                printf("Loaded artist %s\n", e->data.artist->name);
+                                break;
+                        case EVENT_ALBUM_ART_LOADED:
+                                /*if (nk_begin(ctx, "Image Viewer",
+                                nk_rect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT),
+                                NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_SCALABLE |
+                                NK_WINDOW_MOVABLE | NK_WINDOW_CLOSABLE)) {
+                                         nk_layout_row_dynamic(ctx, WINDOW_HEIGHT - 60, 1);
+                                         if (nk_group_begin(ctx, "Image Scroll", NK_WINDOW_BORDER)) {
+                                                nk_label(ctx, e->data.album->title, NK_TEXT_LEFT);
+                                                nk_image(ctx, e->data.album->art.nk_img);
+                                                 nk_group_end(ctx);
+                                         }
+
+                                }
+                                nk_end(ctx);*/
+                                printf("Loaded album art for %s (%d x %d)\n", e->data.album->title, e->data.album->art.width, e->data.album->art.height);
+                                break;
+                        }
+                        free(e);
+                        e = try_dequeue_event(&library.event_queue);
+                }
+
+                if (nk_begin(ctx, "Image Viewer",
+                nk_rect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT),
+                NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_SCALABLE |
+                NK_WINDOW_MOVABLE | NK_WINDOW_CLOSABLE)) {
+                         nk_layout_row_dynamic(ctx, WINDOW_HEIGHT - 60, 1);
+                         if (nk_group_begin(ctx, "Image Scroll", NK_WINDOW_BORDER)) {
+                                 Album* current = library.album_list.head;
+                                 while (current) {
+                                        nk_label(ctx, current->title, NK_TEXT_LEFT);
+                                        nk_image(ctx, current->art.nk_img);
+                                        current = current->next;
+                                 }
+                                 nk_group_end(ctx);
+                         }
+
+                }
+                nk_end(ctx);
+
+                pthread_mutex_lock(&library.mutex);
+                scanning_done = library.scanning_done;
+                pthread_mutex_unlock(&library.mutex);
+
+                if (scanning_done && library.event_queue.head == NULL) {
+                        pthread_mutex_lock(&library.album_cover_queue.mutex);
+                        library.album_cover_queue.finished = true;
+                        pthread_cond_signal(&library.album_cover_queue.cond);
+                        pthread_mutex_unlock(&library.album_cover_queue.mutex);
+                }
+
+                glfwGetWindowSize(win, &width, &height);
+                glViewport(0, 0, width, height);
+                glClear(GL_COLOR_BUFFER_BIT);
+                glClearColor(bg.r, bg.g, bg.b, bg.a);
+                nk_glfw3_render(NK_ANTI_ALIASING_ON, MAX_VERTEX_BUFFER, MAX_ELEMENT_BUFFER);
+                glfwSwapBuffers(win);
+        }*/
+while (!glfwWindowShouldClose(win)) {
+    Event* e = try_dequeue_event(&library.event_queue);
+    bool scanning_done = false;
+
+    glfwPollEvents();
+    nk_glfw3_new_frame();
+
+    while (e) {
+        switch (e->type) {
+            case EVENT_TRACK_LOADED:
+                printf("Loaded track %s\n", e->data.track->meta.title);
+                break;
+            case EVENT_ALBUM_LOADED:
+                printf("Loaded album %s\n", e->data.album->title);
+                break;
+            case EVENT_ARTIST_LOADED:
+                printf("Loaded artist %s\n", e->data.artist->name);
+                break;
+            case EVENT_ALBUM_ART_LOADED:
+                printf("Loaded album art for %s (%d x %d)\n", e->data.album->title, e->data.album->art.width, e->data.album->art.height);
+                break;
+        }
+        free(e);
+        e = try_dequeue_event(&library.event_queue);
+    }
+
+    pthread_mutex_lock(&library.mutex);
+    scanning_done = library.scanning_done;
+    pthread_mutex_unlock(&library.mutex);
+
+    if (scanning_done && library.event_queue.head == NULL) {
+        pthread_mutex_lock(&library.album_cover_queue.mutex);
+        library.album_cover_queue.finished = true;
+        pthread_cond_signal(&library.album_cover_queue.cond);
+        pthread_mutex_unlock(&library.album_cover_queue.mutex);
+    }
+
+    /* Draw */
+    if (ui_state.view == VIEW_ALBUM_GRID) {
+        // Album grid view
+        if (nk_begin(ctx, "Album Grid",
+                     nk_rect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT),
+                     NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_SCALABLE |
+                     NK_WINDOW_MOVABLE | NK_WINDOW_CLOSABLE)) {
+
+            int columns = WINDOW_WIDTH / (ALBUM_SIZE + 10);
+            nk_layout_row_static(ctx, ALBUM_SIZE + 25, ALBUM_SIZE, columns);
+
+            Album* album = library.album_list.head;
+            while (album) {
+                if (nk_group_begin(ctx, album->title, NK_WINDOW_BORDER)) {
+                    nk_layout_row_static(ctx, ALBUM_SIZE, ALBUM_SIZE, 1);
+                    if (nk_button_image(ctx, album->art.nk_img)) {
+                        ui_state.view = VIEW_ALBUM_DETAIL;
+                        ui_state.selected_album = album;
+                    }
+                    nk_layout_row_dynamic(ctx, 20, 1);
+                    nk_label(ctx, album->title, NK_TEXT_CENTERED);
+                    nk_group_end(ctx);
+                }
+                album = album->next;
+            }
+        }
+        nk_end(ctx);
+    } else if (ui_state.view == VIEW_ALBUM_DETAIL && ui_state.selected_album) {
+        // Detailed album view
+        Album* selected_album = ui_state.selected_album;
+        if (nk_begin(ctx, selected_album->title,
+                     nk_rect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT),
+                     NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_SCALABLE |
+                     NK_WINDOW_MOVABLE | NK_WINDOW_CLOSABLE)) {
+
+            nk_layout_row_dynamic(ctx, 30, 1);
+            nk_label(ctx, selected_album->title, NK_TEXT_CENTERED);
+            nk_image(ctx, selected_album->art.nk_img);
+
+            nk_layout_row_dynamic(ctx, 20, 1);
+            nk_label(ctx, "Tracks:", NK_TEXT_LEFT);
+
+            TrackNode* track_node = selected_album->tracks_head;
+            while (track_node) {
+                nk_layout_row_dynamic(ctx, 20, 1);
+                nk_label(ctx, track_node->track->meta.title, NK_TEXT_LEFT);
+                track_node = track_node->next;
+            }
+
+            nk_layout_row_dynamic(ctx, 30, 1);
+            if (nk_button_label(ctx, "Back to Albums")) {
+                ui_state.view = VIEW_ALBUM_GRID;
+                ui_state.selected_album = NULL;
+            }
+        }
+        nk_end(ctx);
+    }
+
+    glfwGetWindowSize(win, &width, &height);
+    glViewport(0, 0, width, height);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glClearColor(bg.r, bg.g, bg.b, bg.a);
+    nk_glfw3_render(NK_ANTI_ALIASING_ON, MAX_VERTEX_BUFFER, MAX_ELEMENT_BUFFER);
+    glfwSwapBuffers(win);
+}
+
+        pthread_join(library_thread, NULL);
+        pthread_join(album_art_thread, NULL);
+
+        pthread_cond_destroy(&library.event_queue.cond);
+        pthread_mutex_destroy(&library.event_queue.mutex);
+        nk_glfw3_shutdown();
+        glfwTerminate();
+        free_music_library(&library);
+}
+
