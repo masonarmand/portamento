@@ -1,8 +1,0 @@
-/home/mason/projects/portamento/build/CMakeFiles/portamento.dir
-/home/mason/projects/portamento/build/CMakeFiles/sqlite3.dir
-/home/mason/projects/portamento/build/CMakeFiles/edit_cache.dir
-/home/mason/projects/portamento/build/CMakeFiles/rebuild_cache.dir
-/home/mason/projects/portamento/build/CMakeFiles/list_install_components.dir
-/home/mason/projects/portamento/build/CMakeFiles/install.dir
-/home/mason/projects/portamento/build/CMakeFiles/install/local.dir
-/home/mason/projects/portamento/build/CMakeFiles/install/strip.dir
