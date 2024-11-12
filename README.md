@@ -1,8 +1,15 @@
+<img src="gui-screenshot.png">
+
+
 # portamento
-Work in progress Music Player for linux.  
+Work in progress Music Player for linux. 
+Written in c89.
 I have taken a break from this project because of school.  
 
-<img src="gui-screenshot.png">
+## Dependencies
+- LibFLAC for reading metadata, might switch to something like taglib
+in future.
+- OpenGL and Nuklear.h for rendering the GUI.
 
 ## Current Features:
 - GUI rendered with opengl
