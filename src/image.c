@@ -124,34 +124,34 @@ void fill_block(unsigned char* block, const unsigned char* data, int by, int bx,
 
 void gl_send_image(Image* image)
 {
-    GLuint tex;
-    GLenum format;
-    int x = image->width;
-    int y = image->height;
-    int n = image->channels;
+        GLuint tex;
+        GLenum format;
+        int x = image->width;
+        int y = image->height;
+        int n = image->channels;
 
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glGenTextures(1, &tex);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-    format = (n == 4) ? GL_COMPRESSED_RGBA_S3TC_DXT1_EXT : GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
+        format = (n == 4) ? GL_COMPRESSED_RGBA_S3TC_DXT1_EXT : GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
 
-    glCompressedTexImage2D(GL_TEXTURE_2D, 0, format, x, y, 0, image->num_bytes, image->data);
-    glGenerateMipmap(GL_TEXTURE_2D);
+        glCompressedTexImage2D(GL_TEXTURE_2D, 0, format, x, y, 0, image->num_bytes, image->data);
+        glGenerateMipmap(GL_TEXTURE_2D);
 
-    stbi_image_free(image->data);
-    image->data = NULL;
+        stbi_image_free(image->data);
+        image->data = NULL;
 
-    image->nk_img = nk_image_id((int)tex);
+        image->nk_img = nk_image_id((int)tex);
 
-    pthread_mutex_lock(&image->mutex);
-    image->loaded = 1;
-    pthread_cond_signal(&image->cond);
-    pthread_mutex_unlock(&image->mutex);
+        pthread_mutex_lock(&image->mutex);
+        image->loaded = 1;
+        pthread_cond_signal(&image->cond);
+        pthread_mutex_unlock(&image->mutex);
 }
 
 
